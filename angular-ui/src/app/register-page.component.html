@@ -1,0 +1,73 @@
+<main class="auth-layout">
+  <section class="auth-intro">
+    <a class="brand" routerLink="/login"><span class="brand-mark">U</span> user<span>space</span></a>
+    <div class="intro-copy">
+      <span class="eyebrow">A BETTER PEOPLE DIRECTORY</span>
+      <h1>Make room for the work that matters.</h1>
+      <p>Create your account and keep the people behind your work connected.</p>
+    </div>
+    <div class="intro-foot"><span class="status-dot"></span> Simple setup. Secure by design.</div>
+  </section>
+
+  <section class="auth-panel">
+    <mat-card class="auth-card register-card">
+      <div class="card-kicker">GET STARTED</div>
+      <h2>Create your account</h2>
+      <p class="muted">A few details and you’ll be on your way.</p>
+
+      @if (errorMessage) {
+        <div class="error-banner" role="alert">{{ errorMessage }}</div>
+      }
+      @if (successMessage) {
+        <div class="success-banner" role="status">{{ successMessage }}</div>
+      }
+
+      <form [formGroup]="form" (ngSubmit)="submit()">
+        <div class="form-row">
+          <mat-form-field appearance="outline">
+            <mat-label>First name</mat-label>
+            <input matInput formControlName="firstName" autocomplete="given-name" />
+            @if (form.controls.firstName.touched && form.controls.firstName.invalid) {
+              <mat-error>Enter your first name.</mat-error>
+            }
+          </mat-form-field>
+          <mat-form-field appearance="outline">
+            <mat-label>Last name</mat-label>
+            <input matInput formControlName="lastName" autocomplete="family-name" />
+            @if (form.controls.lastName.touched && form.controls.lastName.invalid) {
+              <mat-error>Enter your last name.</mat-error>
+            }
+          </mat-form-field>
+        </div>
+        <mat-form-field appearance="outline">
+          <mat-label>Email address</mat-label>
+          <input matInput type="email" formControlName="email" autocomplete="email" />
+          @if (form.controls.email.touched && form.controls.email.invalid) {
+            <mat-error>Enter a valid email address.</mat-error>
+          }
+        </mat-form-field>
+        <mat-form-field appearance="outline">
+          <mat-label>Mobile number</mat-label>
+          <input matInput type="tel" formControlName="mobile" autocomplete="tel" />
+          @if (form.controls.mobile.touched && form.controls.mobile.invalid) {
+            <mat-error>Enter a valid phone number.</mat-error>
+          }
+        </mat-form-field>
+        <mat-form-field appearance="outline">
+          <mat-label>Password</mat-label>
+          <input matInput type="password" formControlName="password" autocomplete="new-password" />
+          @if (form.controls.password.touched && form.controls.password.invalid) {
+            <mat-error>Use 8–72 characters.</mat-error>
+          }
+        </mat-form-field>
+        <button mat-flat-button class="primary-button" type="submit" [disabled]="loading">
+          {{ loading ? 'Creating account…' : 'Create account' }}
+          <span aria-hidden="true">→</span>
+        </button>
+      </form>
+
+      <div class="auth-switch">Already have an account? <a routerLink="/login">Sign in</a></div>
+      <div class="secure-note"><span aria-hidden="true">●</span> Your information is securely encrypted</div>
+    </mat-card>
+  </section>
+</main>

@@ -1,0 +1,125 @@
+<div class="dashboard-shell">
+  <header class="topbar">
+    <a class="brand" routerLink="/dashboard">
+      <span class="brand-mark">U</span> user<span>space</span>
+    </a>
+    <div class="topbar-right">
+      <span class="workspace-label"><span class="workspace-dot"></span> Workspace</span>
+      <span class="avatar" aria-label="Account">U</span>
+      <button mat-button class="logout-button" (click)="logout()">Sign out</button>
+    </div>
+  </header>
+
+  <main class="dashboard-content">
+    <section class="welcome-row">
+      <div>
+        <div class="breadcrumb">WORKSPACE <span>/</span> PEOPLE</div>
+        <h1>Your people</h1>
+        <p class="subtitle">A thoughtful space for the people who make your work happen.</p>
+      </div>
+      <button mat-flat-button class="add-button" (click)="openEditor()">
+        <span class="plus-icon">+</span> Add person
+      </button>
+    </section>
+
+    <section class="summary-grid" aria-label="Directory summary">
+      <mat-card class="summary-card">
+        <div class="summary-icon people-icon">P</div>
+        <div><span class="summary-label">TOTAL PEOPLE</span><strong>{{ page?.totalElements ?? '—' }}</strong></div>
+        <span class="summary-caption">In your directory</span>
+      </mat-card>
+      <mat-card class="summary-card">
+        <div class="summary-icon secure-icon">✓</div>
+        <div><span class="summary-label">DIRECTORY STATUS</span><strong class="status-value">All set</strong></div>
+        <span class="summary-caption">Your workspace is active</span>
+      </mat-card>
+      <mat-card class="summary-card date-card">
+        <div class="summary-icon date-icon">↗</div>
+        <div><span class="summary-label">QUICK TIP</span><strong class="tip-value">Keep it current</strong></div>
+        <span class="summary-caption">Add details to find people faster</span>
+      </mat-card>
+    </section>
+
+    <mat-card class="directory-card">
+      <div class="directory-heading">
+        <div>
+          <h2>People directory</h2>
+          <p>Manage and find your team members.</p>
+        </div>
+        <form class="search-form" (submit)="$event.preventDefault(); applySearch()">
+          <mat-form-field appearance="outline" subscriptSizing="dynamic">
+            <span matTextPrefix class="search-prefix">⌕&nbsp;</span>
+            <mat-label>Search by email</mat-label>
+            <input matInput [formControl]="search" placeholder="name@example.com" />
+          </mat-form-field>
+          <button mat-stroked-button class="search-button" type="submit">Search</button>
+        </form>
+      </div>
+
+      @if (errorMessage) {
+        <div class="table-message error-message" role="alert">
+          {{ errorMessage }}
+          <button mat-button (click)="loadUsers()">Try again</button>
+        </div>
+      } @else if (loading && !page) {
+        <div class="loading-state"><mat-spinner diameter="34" /><span>Loading your directory…</span></div>
+      } @else {
+        <div class="table-wrap">
+          <table mat-table [dataSource]="page?.content ?? []" class="people-table">
+            <ng-container matColumnDef="person">
+              <th mat-header-cell *matHeaderCellDef>PERSON</th>
+              <td mat-cell *matCellDef="let user">
+                <div class="person-cell">
+                  <span class="person-avatar">{{ user.firstName.charAt(0) }}{{ user.lastName.charAt(0) }}</span>
+                  <span class="person-name">{{ user.firstName }} {{ user.lastName }}</span>
+                </div>
+              </td>
+            </ng-container>
+            <ng-container matColumnDef="email">
+              <th mat-header-cell *matHeaderCellDef>EMAIL ADDRESS</th>
+              <td mat-cell *matCellDef="let user">{{ user.email }}</td>
+            </ng-container>
+            <ng-container matColumnDef="mobile">
+              <th mat-header-cell *matHeaderCellDef>MOBILE</th>
+              <td mat-cell *matCellDef="let user">{{ user.mobile }}</td>
+            </ng-container>
+            <ng-container matColumnDef="joined">
+              <th mat-header-cell *matHeaderCellDef>DATE ADDED</th>
+              <td mat-cell *matCellDef="let user">{{ user.createdAt | date: 'MMM d, y' }}</td>
+            </ng-container>
+            <ng-container matColumnDef="actions">
+              <th mat-header-cell *matHeaderCellDef><span class="visually-hidden">Actions</span></th>
+              <td mat-cell *matCellDef="let user">
+                <div class="row-actions">
+                  <button mat-button class="edit-action" (click)="openEditor(user)">Edit</button>
+                  <button mat-button class="delete-action" (click)="remove(user)">Remove</button>
+                </div>
+              </td>
+            </ng-container>
+            <tr mat-header-row *matHeaderRowDef="columns"></tr>
+            <tr mat-row *matRowDef="let row; columns: columns"></tr>
+          </table>
+          @if (!loading && !page?.content?.length) {
+            <div class="empty-state">
+              <span class="empty-icon">◎</span>
+              <strong>{{ search.value ? 'No people found' : 'Your directory is ready' }}</strong>
+              <p>{{ search.value ? 'Try another email address.' : 'Add your first person to get started.' }}</p>
+              @if (!search.value) {
+                <button mat-stroked-button (click)="openEditor()">Add your first person</button>
+              }
+            </div>
+          }
+        </div>
+        <mat-paginator
+          [length]="page?.totalElements ?? 0"
+          [pageIndex]="pageIndex"
+          [pageSize]="pageSize"
+          [pageSizeOptions]="[5, 10, 25]"
+          (page)="changePage($event)"
+          aria-label="People directory pages"
+        />
+      }
+    </mat-card>
+    <footer class="page-footer"><span>USERSPACE</span> A little more organized, every day.</footer>
+  </main>
+</div>

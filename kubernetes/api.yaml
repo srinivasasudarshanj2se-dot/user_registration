@@ -1,0 +1,121 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: user-registration-api
+  namespace: user-registration
+  labels:
+    app.kubernetes.io/name: user-registration-api
+    app.kubernetes.io/part-of: user-registration
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: user-registration-api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: user-registration-api
+        app.kubernetes.io/part-of: user-registration
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: api
+          image: user-registration-api:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8081
+          env:
+            - name: SERVER_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: user-registration-config
+                  key: SERVER_PORT
+            - name: DB_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: user-registration-config
+                  key: DB_URL
+            - name: DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: user-registration-secrets
+                  key: db-username
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: user-registration-secrets
+                  key: db-password
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: user-registration-secrets
+                  key: jwt-secret
+            - name: JWT_ISSUER
+              valueFrom:
+                configMapKeyRef:
+                  name: user-registration-config
+                  key: JWT_ISSUER
+          startupProbe:
+            httpGet:
+              path: /actuator/health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 5
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  namespace: user-registration
+  labels:
+    app.kubernetes.io/name: user-registration-api
+    app.kubernetes.io/part-of: user-registration
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: user-registration-api
+  ports:
+    - name: http
+      port: 8081
+      targetPort: http

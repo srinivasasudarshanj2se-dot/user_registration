@@ -1,0 +1,11 @@
+.git
+.gradle
+.idea
+.vscode
+.env
+build
+node_modules
+angular-ui/node_modules
+angular-ui/.angular
+angular-ui/dist
+**/*.iml
