@@ -1,18 +1,18 @@
 name: user-registration
 
 services:
-  mysql:
+  auth-db:
     image: mysql:9
     restart: unless-stopped
     environment:
-      MYSQL_DATABASE: ${MYSQL_DATABASE:-user_registration}
+      MYSQL_DATABASE: user_registration_auth
       MYSQL_USER: ${DB_USERNAME:?Set DB_USERNAME in .env}
       MYSQL_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD in .env}
     volumes:
-      - mysql-data:/var/lib/mysql
+      - auth-db-data:/var/lib/mysql
     healthcheck:
-      test: 'mysqladmin ping --host=127.0.0.1 --user="$$MYSQL_USER" --password="$$MYSQL_PASSWORD" --silent'
+      test: ["CMD-SHELL", 'mysqladmin ping --host=127.0.0.1 --user="$$MYSQL_USER" --password="$$MYSQL_PASSWORD" --silent']
       interval: 5s
       timeout: 5s
       retries: 20
@@ -20,26 +20,77 @@ services:
     networks:
       - app-network
 
-  api:
+  user-db:
+    image: mysql:9
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: user_registration_users
+      MYSQL_USER: ${DB_USERNAME:?Set DB_USERNAME in .env}
+      MYSQL_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD in .env}
+    volumes:
+      - user-db-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", 'mysqladmin ping --host=127.0.0.1 --user="$$MYSQL_USER" --password="$$MYSQL_PASSWORD" --silent']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    networks:
+      - app-network
+
+  auth-service:
     build:
       context: .
       dockerfile: Dockerfile
-    image: user-registration-api:local
+    image: user-registration-auth-service:local
     restart: unless-stopped
     environment:
       SERVER_PORT: 8081
-      DB_URL: jdbc:mysql://mysql:3306/${MYSQL_DATABASE:-user_registration}?connectTimeout=5000&socketTimeout=30000
+      DB_URL: jdbc:mysql://auth-db:3306/user_registration_auth?connectTimeout=5000&socketTimeout=30000
       DB_USERNAME: ${DB_USERNAME:?Set DB_USERNAME in .env}
       DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
       JWT_ISSUER: ${JWT_ISSUER:-user-registration}
+      USER_SERVICE_URL: http://user-service:8082
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:-local-internal-api-key-change-me}
     ports:
       - "${API_PORT:-8081}:8081"
     depends_on:
-      mysql:
+      auth-db:
+        condition: service_healthy
+      user-service:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8081/actuator/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    networks:
+      - app-network
+
+  user-service:
+    build:
+      context: .
+      dockerfile: services/user-service/Dockerfile
+    image: user-registration-user-service:local
+    restart: unless-stopped
+    environment:
+      SERVER_PORT: 8082
+      DB_URL: jdbc:mysql://user-db:3306/user_registration_users?connectTimeout=5000&socketTimeout=30000
+      DB_USERNAME: ${DB_USERNAME:?Set DB_USERNAME in .env}
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
+      JWT_ISSUER: ${JWT_ISSUER:-user-registration}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:-local-internal-api-key-change-me}
+    ports:
+      - "${USER_API_PORT:-8082}:8082"
+    depends_on:
+      user-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8082/actuator/health"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -56,7 +107,9 @@ services:
     ports:
       - "${UI_PORT:-4200}:8080"
     depends_on:
-      api:
+      auth-service:
+        condition: service_healthy
+      user-service:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:8080/"]
@@ -67,7 +120,8 @@ services:
       - app-network
 
 volumes:
-  mysql-data:
+  auth-db-data:
+  user-db-data:
 
 networks:
   app-network:

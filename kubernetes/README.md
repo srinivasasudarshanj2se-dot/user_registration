@@ -1,6 +1,6 @@
 # Docker and Kubernetes
 
-The root `docker-compose.yaml` runs MySQL, the Spring Boot API, and the Angular UI. The UI's Nginx container serves the SPA and proxies `/api` and `/actuator` to the API, so the browser uses one origin.
+The root `docker-compose.yaml` runs separate authentication and user services, each with its own MySQL database, plus the Angular UI. NGINX routes `/api/v1/auth/` to auth-service and `/api/v1/users/` to user-service.
 
 ## Docker Compose (local)
 
@@ -12,7 +12,7 @@ Copy-Item .env.example .env
 docker compose up --build
 ```
 
-Open `http://localhost:4200`. The API is also published at `http://localhost:8081`; MySQL remains private to the Compose network. The MySQL named volume keeps local database data across container restarts.
+Open `http://localhost:4200`. Auth and user APIs are published at `http://localhost:8081` and `http://localhost:8082`; MySQL remains private to the Compose network. Each service has an independent database volume.
 
 Stop the containers with `Ctrl+C`, or from another terminal run:
 
@@ -30,19 +30,21 @@ The `.env` values are for local development only. Never commit `.env` or reuse t
 
 ## Kubernetes
 
-The manifests create a namespace, MySQL `StatefulSet` with a persistent volume claim, API and UI deployments/services, and an optional NGINX Ingress. Create the namespace and a Kubernetes Secret before applying the application manifests. Do not commit credentials in YAML.
+The manifests create a namespace, a MySQL `StatefulSet` with separate auth/user databases, auth and user service deployments, the UI, and an optional NGINX Ingress. Create the namespace and Kubernetes Secret before applying the application manifests. Do not commit credentials in YAML.
 
 1. Build the images from the repository root:
 
    ```powershell
-   docker build -t user-registration-api:local -f Dockerfile .
+   docker build -t user-registration-auth-service:local -f Dockerfile .
+   docker build -t user-registration-user-service:local -f services/user-service/Dockerfile .
    docker build -t user-registration-ui:local -f angular-ui/Dockerfile ./angular-ui
    ```
 
    For a local cluster such as Minikube, load the images into the cluster if it does not share the local Docker daemon:
 
    ```powershell
-   minikube image load user-registration-api:local
+   minikube image load user-registration-auth-service:local
+   minikube image load user-registration-user-service:local
    minikube image load user-registration-ui:local
    ```
 
@@ -58,7 +60,8 @@ The manifests create a namespace, MySQL `StatefulSet` with a persistent volume c
      --from-literal=db-username=registration_app `
      --from-literal=db-password='<strong-database-password>' `
      --from-literal=mysql-root-password='<different-strong-root-password>' `
-     --from-literal=jwt-secret=$jwtSecret
+     --from-literal=jwt-secret=$jwtSecret `
+     --from-literal=internal-api-key='<strong-internal-api-key>'
    ```
 
    `jwt-secret` must be base64 text that decodes to at least 32 bytes. The application decodes it before signing tokens. For production, use your cluster's external secret manager rather than storing manually created Kubernetes Secrets in source control.
@@ -71,7 +74,8 @@ The manifests create a namespace, MySQL `StatefulSet` with a persistent volume c
    kubectl apply -f kubernetes/api.yaml
    kubectl apply -f kubernetes/ui.yaml
    kubectl rollout status statefulset/mysql -n user-registration
-   kubectl rollout status deployment/user-registration-api -n user-registration
+   kubectl rollout status deployment/auth-service -n user-registration
+   kubectl rollout status deployment/user-service -n user-registration
    kubectl rollout status deployment/user-registration-ui -n user-registration
    ```
 
@@ -95,8 +99,9 @@ The manifests create a namespace, MySQL `StatefulSet` with a persistent volume c
 ## Operational notes
 
 - MySQL must have a default `ReadWriteOnce` storage class available for its 10 GiB claim.
-- The API runs with two replicas; Flyway migration locking coordinates application startup against the shared database.
+- Each service owns its data schema; registration and login call the user service over an API-key-protected internal HTTP API.
 - Kubernetes probes use the backend health endpoint and UI HTTP endpoint.
-- The UI container proxies application and actuator routes to the internal `api` service. Only the UI needs public ingress for browser use.
+- The UI container routes auth and user API requests to their separate cluster services. Only the UI needs public ingress for browser use.
 - The demo H2 profile is for local development; Compose and Kubernetes use MySQL.
+- Kubernetes uses two database schemas on the MySQL StatefulSet; Compose uses separate MySQL containers. The MySQL init script creates the user-service schema on an empty data volume.
 - These manifests are a starting point, not a production platform baseline. Configure TLS, an ingress controller, network policies, backup/restore, secret rotation, monitoring, storage sizing, and resource values for the target environment.

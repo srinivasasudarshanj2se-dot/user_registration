@@ -1,15 +1,12 @@
 FROM eclipse-temurin:25-jdk-alpine AS build
 
 WORKDIR /workspace
-
 COPY gradlew settings.gradle build.gradle ./
 COPY gradle ./gradle
-RUN chmod +x gradlew
-
-COPY src ./src
-RUN ./gradlew --no-daemon bootJar \
-    && set -eux; JAR="$(find build/libs -maxdepth 1 -type f -name '*.jar' ! -name '*-plain.jar' | head -n 1)"; \
-    test -n "$JAR"; cp "$JAR" /workspace/app.jar
+COPY services ./services
+RUN chmod +x gradlew \
+    && ./gradlew --no-daemon :services:auth-service:bootJar \
+    && find services/auth-service/build/libs -maxdepth 1 -type f -name '*.jar' ! -name '*-plain.jar' -exec cp {} /workspace/app.jar \;
 
 FROM eclipse-temurin:25-jre-alpine
 
@@ -19,11 +16,8 @@ RUN apk add --no-cache curl \
 
 WORKDIR /app
 COPY --from=build --chown=spring:spring /workspace/app.jar app.jar
-
 USER 10001
 EXPOSE 8081
-
 HEALTHCHECK --interval=15s --timeout=3s --start-period=45s --retries=3 \
     CMD curl --fail --silent http://localhost:8081/actuator/health || exit 1
-
 ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75.0", "-jar", "/app/app.jar"]

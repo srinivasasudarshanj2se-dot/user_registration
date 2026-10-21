@@ -1,20 +1,20 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: user-registration-api
+  name: auth-service
   namespace: user-registration
   labels:
-    app.kubernetes.io/name: user-registration-api
+    app.kubernetes.io/name: auth-service
     app.kubernetes.io/part-of: user-registration
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app.kubernetes.io/name: user-registration-api
+      app.kubernetes.io/name: auth-service
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: user-registration-api
+        app.kubernetes.io/name: auth-service
         app.kubernetes.io/part-of: user-registration
     spec:
       securityContext:
@@ -24,23 +24,25 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       containers:
-        - name: api
-          image: user-registration-api:local
+        - name: auth-service
+          image: user-registration-auth-service:local
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
               containerPort: 8081
           env:
             - name: SERVER_PORT
-              valueFrom:
-                configMapKeyRef:
-                  name: user-registration-config
-                  key: SERVER_PORT
+              value: "8081"
             - name: DB_URL
               valueFrom:
                 configMapKeyRef:
                   name: user-registration-config
-                  key: DB_URL
+                  key: AUTH_DB_URL
+            - name: USER_SERVICE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: user-registration-config
+                  key: USER_SERVICE_URL
             - name: DB_USERNAME
               valueFrom:
                 secretKeyRef:
@@ -56,6 +58,11 @@ spec:
                 secretKeyRef:
                   name: user-registration-secrets
                   key: jwt-secret
+            - name: INTERNAL_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: user-registration-secrets
+                  key: internal-api-key
             - name: JWT_ISSUER
               valueFrom:
                 configMapKeyRef:
@@ -93,8 +100,7 @@ spec:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities:
-              drop:
-                - ALL
+              drop: ["ALL"]
           volumeMounts:
             - name: tmp
               mountPath: /tmp
@@ -106,16 +112,139 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: api
+  name: auth-service
   namespace: user-registration
   labels:
-    app.kubernetes.io/name: user-registration-api
+    app.kubernetes.io/name: auth-service
     app.kubernetes.io/part-of: user-registration
 spec:
   type: ClusterIP
   selector:
-    app.kubernetes.io/name: user-registration-api
+    app.kubernetes.io/name: auth-service
   ports:
     - name: http
       port: 8081
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: user-service
+  namespace: user-registration
+  labels:
+    app.kubernetes.io/name: user-service
+    app.kubernetes.io/part-of: user-registration
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: user-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: user-service
+        app.kubernetes.io/part-of: user-registration
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: user-service
+          image: user-registration-user-service:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8082
+          env:
+            - name: SERVER_PORT
+              value: "8082"
+            - name: DB_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: user-registration-config
+                  key: USER_DB_URL
+            - name: DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: user-registration-secrets
+                  key: db-username
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: user-registration-secrets
+                  key: db-password
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: user-registration-secrets
+                  key: jwt-secret
+            - name: INTERNAL_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: user-registration-secrets
+                  key: internal-api-key
+            - name: JWT_ISSUER
+              valueFrom:
+                configMapKeyRef:
+                  name: user-registration-config
+                  key: JWT_ISSUER
+          startupProbe:
+            httpGet:
+              path: /actuator/health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 5
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: user-service
+  namespace: user-registration
+  labels:
+    app.kubernetes.io/name: user-service
+    app.kubernetes.io/part-of: user-registration
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: user-service
+  ports:
+    - name: http
+      port: 8082
       targetPort: http

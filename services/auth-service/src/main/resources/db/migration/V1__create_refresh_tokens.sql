@@ -1,0 +1,6 @@
+CREATE TABLE refresh_tokens (
+    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    token_hash VARCHAR(64) NOT NULL UNIQUE,
+    user_uuid VARCHAR(50) NOT NULL,
+    expiry_date TIMESTAMP NOT NULL
+);

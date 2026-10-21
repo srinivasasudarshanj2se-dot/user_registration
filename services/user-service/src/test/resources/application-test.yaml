@@ -1,0 +1,8 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:user_service_test;MODE=MySQL;DB_CLOSE_DELAY=-1
+    username: sa
+    password:
+
+internal:
+  api-key: test-internal-api-key

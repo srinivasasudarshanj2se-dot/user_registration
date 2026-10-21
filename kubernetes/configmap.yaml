@@ -4,7 +4,8 @@ metadata:
   name: user-registration-config
   namespace: user-registration
 data:
-  MYSQL_DATABASE: user_registration
-  DB_URL: jdbc:mysql://mysql:3306/user_registration?connectTimeout=5000&socketTimeout=30000
+  MYSQL_DATABASE: user_registration_auth
+  AUTH_DB_URL: jdbc:mysql://mysql:3306/user_registration_auth?connectTimeout=5000&socketTimeout=30000
+  USER_DB_URL: jdbc:mysql://mysql:3306/user_registration_users?connectTimeout=5000&socketTimeout=30000
+  USER_SERVICE_URL: http://user-service:8082
   JWT_ISSUER: user-registration
-  SERVER_PORT: "8081"
