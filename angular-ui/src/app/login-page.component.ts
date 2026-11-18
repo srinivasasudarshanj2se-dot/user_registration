@@ -1,13 +1,13 @@
-import { Component, inject } from '@angular/core';
-import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
-import { Router, RouterLink } from '@angular/router';
-import { MatButtonModule } from '@angular/material/button';
-import { MatCardModule } from '@angular/material/card';
-import { MatFormFieldModule } from '@angular/material/form-field';
-import { MatInputModule } from '@angular/material/input';
-import { finalize } from 'rxjs';
+import {Component, inject} from '@angular/core';
+import {ReactiveFormsModule, FormBuilder, Validators} from '@angular/forms';
+import {Router, RouterLink} from '@angular/router';
+import {MatButtonModule} from '@angular/material/button';
+import {MatCardModule} from '@angular/material/card';
+import {MatFormFieldModule} from '@angular/material/form-field';
+import {MatInputModule} from '@angular/material/input';
+import {finalize} from 'rxjs';
 
-import { AuthService } from './auth.service';
+import {AuthService} from './auth.service';
 
 @Component({
   selector: 'app-login-page',
@@ -27,7 +27,8 @@ export class LoginPageComponent {
   constructor(
     private readonly auth: AuthService,
     private readonly router: Router,
-  ) {}
+  ) {
+  }
 
   submit(): void {
     if (this.form.invalid || this.loading) {
@@ -36,7 +37,7 @@ export class LoginPageComponent {
     }
     this.loading = true;
     this.errorMessage = '';
-    const { email, password } = this.form.getRawValue();
+    const {email, password} = this.form.getRawValue();
     this.auth.login(email, password).pipe(finalize(() => (this.loading = false))).subscribe({
       next: () => void this.router.navigateByUrl('/dashboard'),
       error: (error: { error?: { message?: string } }) => {

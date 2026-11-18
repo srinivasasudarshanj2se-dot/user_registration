@@ -4,12 +4,15 @@ WORKDIR /workspace
 
 COPY gradlew settings.gradle build.gradle ./
 COPY gradle ./gradle
+COPY gateway/build.gradle ./gateway/build.gradle
 RUN chmod +x gradlew
 
 COPY src ./src
-RUN ./gradlew --no-daemon bootJar \
-    && set -eux; JAR="$(find build/libs -maxdepth 1 -type f -name '*.jar' ! -name '*-plain.jar' | head -n 1)"; \
-    test -n "$JAR"; cp "$JAR" /workspace/app.jar
+RUN set -eux; \
+    ./gradlew --no-daemon :bootJar; \
+    JAR="$(find build/libs -maxdepth 1 -type f -name '*.jar' ! -name '*-plain.jar' | head -n 1)"; \
+    test -n "$JAR"; \
+    cp "$JAR" /workspace/app.jar
 
 FROM eclipse-temurin:25-jre-alpine
 

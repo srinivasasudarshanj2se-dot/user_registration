@@ -230,6 +230,27 @@
   box-shadow: 0 2px 5px #1a302b05 !important;
 }
 
+.profile-summary {
+  display: grid;
+  gap: 20px;
+  padding: 24px;
+
+  > p {
+    display: grid;
+    gap: 6px;
+    margin: 0;
+    color: #64716a;
+    font-size: 13px;
+  }
+
+  > p strong {
+    color: #8a948e;
+    font-size: 10px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+}
+
 .directory-heading {
   display: flex;
   justify-content: space-between;

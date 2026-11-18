@@ -1,33 +1,61 @@
 package org.example.user_registration;
 
+import org.example.user_registration.user.Role;
+import org.example.user_registration.user.RoleRepository;
+import org.example.user_registration.user.User;
+import org.example.user_registration.user.UserRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
-import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.mysql.MySQLContainer;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest
 @AutoConfigureMockMvc
-@ActiveProfiles("test")
+@Testcontainers(disabledWithoutDocker = true)
 class UserRegistrationApplicationTests {
+    @Container
+    private static final MySQLContainer mysql = new MySQLContainer("mysql:8.4")
+            .withDatabaseName("user_registration")
+            .withUsername("registration_app")
+            .withPassword("integration-test-password");
+
+    @DynamicPropertySource
+    static void configureMySql(DynamicPropertyRegistry registry) {
+        registry.add("spring.datasource.url", mysql::getJdbcUrl);
+        registry.add("spring.datasource.username", mysql::getUsername);
+        registry.add("spring.datasource.password", mysql::getPassword);
+    }
+
     @Autowired
     private MockMvc mockMvc;
 
     @Autowired
     private ObjectMapper objectMapper;
 
+    @Autowired
+    private UserRepository userRepository;
+
+    @Autowired
+    private RoleRepository roleRepository;
+
     @Test
-    void registrationLoginAndProtectedUserListingWork() throws Exception {
+    void jwtRolesProtectAdminOperationsAndUsersCanManageTheirOwnProfile() throws Exception {
         String registration = """
                 {
                   "firstName": "Sudarshan",
@@ -56,9 +84,50 @@ class UserRegistrationApplicationTests {
                 .andExpect(status().isUnauthorized());
         mockMvc.perform(get("/api/v1/users")
                         .header("Authorization", "Bearer " + token.get("accessToken").asText()))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/calls")
+                        .header("Authorization", "Bearer " + token.get("accessToken").asText()))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(get("/api/v1/calls"))
+                .andExpect(status().isUnauthorized());
+
+        String userAuthorization = "Bearer " + token.get("accessToken").asText();
+        String selfResponse = mockMvc.perform(get("/api/v1/users/me")
+                        .header("Authorization", userAuthorization))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        JsonNode self = objectMapper.readTree(selfResponse);
+        assertEquals("sudarshan@example.com", self.get("email").asText());
+        mockMvc.perform(get("/api/v1/users/" + self.get("id").asText())
+                        .header("Authorization", userAuthorization))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(put("/api/v1/users/me")
+                        .header("Authorization", userAuthorization)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "firstName": "Sudarshan",
+                                  "lastName": "Dasari",
+                                  "mobile": "9999999999"
+                                }
+                                """))
                 .andExpect(status().isOk());
 
-        String authorization = "Bearer " + token.get("accessToken").asText();
+        User user = userRepository.findByEmailIgnoreCase("sudarshan@example.com").orElseThrow();
+        Role adminRole = roleRepository.findByName("ROLE_ADMIN").orElseThrow();
+        user.getRoles().add(adminRole);
+        userRepository.save(user);
+        String adminLogin = mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(login))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        String authorization = "Bearer " + objectMapper.readTree(adminLogin).get("accessToken").asText();
+
+        mockMvc.perform(get("/api/v1/users").header("Authorization", authorization))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/v1/calls").header("Authorization", authorization))
+                .andExpect(status().isOk());
         String createUser = """
                 {
                   "firstName": "Test",

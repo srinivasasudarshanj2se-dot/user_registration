@@ -5,7 +5,7 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
-import { finalize } from 'rxjs';
+import {finalize, switchMap, tap} from 'rxjs';
 
 import { AuthService } from './auth.service';
 
@@ -40,12 +40,23 @@ export class RegisterPageComponent {
     }
     this.loading = true;
     this.errorMessage = '';
-    this.auth.register(this.form.getRawValue()).pipe(finalize(() => (this.loading = false))).subscribe({
-      next: () => {
-        this.successMessage = 'Your account is ready. Sign in to continue.';
-        window.setTimeout(() => void this.router.navigateByUrl('/login'), 900);
-      },
+    const request = this.form.getRawValue();
+    let accountCreated = false;
+    this.auth.register(request).pipe(
+      tap(() => {
+        accountCreated = true;
+        this.successMessage = 'Your account is ready. Signing you in…';
+      }),
+      switchMap(() => this.auth.login(request.email, request.password)),
+      finalize(() => (this.loading = false)),
+    ).subscribe({
+      next: () => void this.router.navigateByUrl('/dashboard'),
       error: (error: { error?: { message?: string } }) => {
+        if (accountCreated) {
+          this.successMessage = 'Your account was created, but automatic sign-in failed. Please sign in.';
+          window.setTimeout(() => void this.router.navigateByUrl('/login'), 900);
+          return;
+        }
         this.errorMessage = error.error?.message ?? 'Unable to create your account. Please try again.';
       },
     });

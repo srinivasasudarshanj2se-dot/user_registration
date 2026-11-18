@@ -8,3 +8,4 @@ data:
   DB_URL: jdbc:mysql://mysql:3306/user_registration?connectTimeout=5000&socketTimeout=30000
   JWT_ISSUER: user-registration
   SERVER_PORT: "8081"
+  SECURITY_CORS_ALLOWED_ORIGIN: http://localhost:4200

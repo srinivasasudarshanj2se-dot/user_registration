@@ -1,0 +1,11 @@
+project_id    = "your-google-cloud-project"
+region        = "asia-south1"
+api_image     = "asia-south1-docker.pkg.dev/your-google-cloud-project/user-registration-tf/user-registration-api:REPLACE_WITH_TAG"
+ui_image      = "asia-south1-docker.pkg.dev/your-google-cloud-project/user-registration-tf/user-registration-ui:REPLACE_WITH_TAG"
+gateway_image = "asia-south1-docker.pkg.dev/your-google-cloud-project/user-registration-tf/user-registration-gateway:REPLACE_WITH_TAG"
+
+# Replace with the gateway URL or custom HTTPS origin after the first apply.
+cors_allowed_origin = "*"
+
+# Development-sized default only; select a production tier and review costs.
+database_tier = "db-f1-micro"

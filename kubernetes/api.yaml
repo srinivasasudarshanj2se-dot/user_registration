@@ -17,6 +17,7 @@ spec:
         app.kubernetes.io/name: user-registration-api
         app.kubernetes.io/part-of: user-registration
     spec:
+      serviceAccountName: user-registration-api
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
@@ -61,6 +62,11 @@ spec:
                 configMapKeyRef:
                   name: user-registration-config
                   key: JWT_ISSUER
+            - name: SECURITY_CORS_ALLOWED_ORIGIN
+              valueFrom:
+                configMapKeyRef:
+                  name: user-registration-config
+                  key: SECURITY_CORS_ALLOWED_ORIGIN
           startupProbe:
             httpGet:
               path: /actuator/health

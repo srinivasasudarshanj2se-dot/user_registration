@@ -33,8 +33,6 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
       JWT_ISSUER: ${JWT_ISSUER:-user-registration}
-    ports:
-      - "${API_PORT:-8081}:8081"
     depends_on:
       mysql:
         condition: service_healthy
@@ -53,13 +51,37 @@ services:
       dockerfile: Dockerfile
     image: user-registration-ui:local
     restart: unless-stopped
-    ports:
-      - "${UI_PORT:-4200}:8080"
+    environment:
+      API_UPSTREAM: http://api:8081
     depends_on:
       api:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:8080/"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    networks:
+      - app-network
+
+  gateway:
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
+    image: user-registration-gateway:local
+    restart: unless-stopped
+    environment:
+      API_UPSTREAM: http://api:8081
+      UI_UPSTREAM: http://ui:8080
+    ports:
+      - "${UI_PORT:-4200}:8080"
+    depends_on:
+      api:
+        condition: service_healthy
+      ui:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8080/gateway-health"]
       interval: 15s
       timeout: 5s
       retries: 3

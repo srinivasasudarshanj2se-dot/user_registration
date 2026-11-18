@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: user-registration-config
+  namespace: user-registration
+data:
+  MYSQL_DATABASE: user_registration
+  DB_URL: jdbc:mysql:///user_registration?cloudSqlInstance=project-1c77217d-d5f2-4a0b-9aa:asia-south1:user-registration-mysql&socketFactory=com.google.cloud.sql.mysql.SocketFactory&connectTimeout=30000&socketTimeout=30000
+  JWT_ISSUER: user-registration
+  SERVER_PORT: "8081"
+  SECURITY_CORS_ALLOWED_ORIGIN: http://35.200.221.220

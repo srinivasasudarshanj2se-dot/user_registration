@@ -40,20 +40,41 @@ export class DashboardPageComponent implements OnInit {
   readonly search = new FormControl('', { nonNullable: true });
   readonly columns = ['person', 'email', 'mobile', 'joined', 'actions'];
   page: UserPage | null = null;
+  profile: User | null = null;
   pageIndex = 0;
   pageSize = 10;
   loading = false;
   errorMessage = '';
+  readonly isAdmin: boolean;
 
   constructor(
     private readonly users: UserService,
     private readonly auth: AuthService,
     private readonly dialog: MatDialog,
     private readonly snackBar: MatSnackBar,
-  ) {}
+  ) {
+    this.isAdmin = this.auth.isAdmin();
+  }
 
   ngOnInit(): void {
-    this.loadUsers();
+    if (this.isAdmin) {
+      this.loadUsers();
+    } else {
+      this.loadProfile();
+    }
+  }
+
+  loadProfile(): void {
+    this.loading = true;
+    this.errorMessage = '';
+    this.users.getMe()
+      .pipe(finalize(() => (this.loading = false)))
+      .subscribe({
+        next: (profile) => (this.profile = profile),
+        error: () => {
+          this.errorMessage = 'We couldn’t load your profile. Please check the connection and try again.';
+        },
+      });
   }
 
   loadUsers(): void {

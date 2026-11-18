@@ -28,6 +28,13 @@ public final class UserDtos {
     ) {
     }
 
+    public record SelfUserUpdateRequest(
+            @NotBlank @Size(max = 100) String firstName,
+            @NotBlank @Size(max = 100) String lastName,
+            @NotBlank @Pattern(regexp = "^[+0-9() -]{7,20}$") String mobile
+    ) {
+    }
+
     public record UserResponse(Long id, String uuid, String firstName, String lastName, String email,
                                String mobile, Boolean enabled, Instant createdAt, Instant updatedAt) {
         public static UserResponse from(User user) {

@@ -18,6 +18,8 @@ import org.springframework.security.oauth2.jwt.JwsHeader;
 import org.springframework.security.oauth2.jwt.JwtClaimsSet;
 import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -32,6 +34,8 @@ import java.util.HexFormat;
 
 @Service
 public class AuthService {
+    private static final Logger logger = LoggerFactory.getLogger(AuthService.class);
+
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
     private final RefreshTokenRepository refreshTokenRepository;
@@ -65,8 +69,9 @@ public class AuthService {
         }
         Role userRole = roleRepository.findByName("ROLE_USER")
                 .orElseThrow(() -> new IllegalStateException("Required ROLE_USER seed data is missing"));
-        userRepository.save(new User(request.firstName().trim(), request.lastName().trim(), email,
+        User user = userRepository.save(new User(request.firstName().trim(), request.lastName().trim(), email,
                 request.mobile().trim(), passwordEncoder.encode(request.password()), userRole));
+        logger.info("User registered successfully (userId={})", user.getId());
     }
 
     @Transactional
@@ -75,6 +80,7 @@ public class AuthService {
                 .filter(User::getEnabled)
                 .filter(candidate -> passwordEncoder.matches(request.password(), candidate.getPassword()))
                 .orElseThrow(() -> new BadCredentialsException("Email or password is incorrect"));
+        logger.info("User authenticated successfully (userId={})", user.getId());
         return issueTokens(user);
     }
 
@@ -82,11 +88,17 @@ public class AuthService {
     public TokenResponse refresh(RefreshRequest request) {
         String suppliedHash = hashToken(request.refreshToken());
         RefreshToken existing = refreshTokenRepository.findByTokenHash(suppliedHash)
-                .orElseThrow(InvalidRefreshTokenException::new);
+                .orElseThrow(() -> {
+                    logger.warn("Refresh token request rejected: token not found");
+                    return new InvalidRefreshTokenException();
+                });
         refreshTokenRepository.delete(existing);
         if (!existing.getExpiryDate().isAfter(Instant.now()) || !existing.getUser().getEnabled()) {
+            logger.warn("Refresh token request rejected (userId={}): token expired or user disabled",
+                    existing.getUser().getId());
             throw new InvalidRefreshTokenException();
         }
+        logger.info("Refresh token renewed successfully (userId={})", existing.getUser().getId());
         return issueTokens(existing.getUser());
     }
 

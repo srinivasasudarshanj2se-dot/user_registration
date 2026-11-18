@@ -2,9 +2,9 @@
 
 ## 1. Purpose
 
-This document describes the design for the user-registration platform: an Angular web client, Spring Boot services for authentication and user management, a Spring Cloud API gateway, and shared platform capabilities for persistence, telemetry, and deployment.
+This document describes the implemented user-registration platform and provides a step-by-step guide to its request, data, and deployment flows.
 
-It also records the implementation boundary of this repository. The current codebase contains a single Spring Boot application containing both authentication and user CRUD, an Angular 20 UI, Docker Compose files for a local stack, and baseline Kubernetes manifests. It does not yet contain the API gateway, independently deployable auth/user services, or full observability stack. The target architecture below is a design direction, not a claim that those components are already implemented.
+The current codebase contains an Angular 20 UI, a separate Spring WebFlux API gateway that uses WebClient for asynchronous HTTP forwarding, one Spring Boot application containing both authentication and user-management modules, Flyway-managed MySQL persistence, and deployment configurations for local Docker Compose, Cloud Run, and GKE. The gateway provides a single entry point and routes API paths to the backend and other paths to the UI. Cloud Run and GKE use Cloud SQL for MySQL. Auth and user management are not independently deployable services, and a full observability stack is not configured.
 
 ## 2. Goals and scope
 
@@ -19,11 +19,29 @@ It also records the implementation boundary of this repository. The current code
 ### Out of scope for the current implementation
 
 - OAuth 2.0 Authorization Server features such as authorization-code grants, consent, and OIDC.
-- API gateway routing and independently deployed microservices.
+- Independently deployed auth and user microservices.
 - Prometheus/Grafana/Jaeger and a configured OpenTelemetry Collector.
 - Fine-grained administrative role-management APIs.
 
 ## 3. Architecture
+
+### Current deployed topology
+
+```text
+Cloud Run:
+Browser --> Cloud Run API Gateway -- /api, /actuator --> Cloud Run API
+             |                                           |
+             +-- other paths --> Cloud Run UI             +--> Cloud SQL
+
+GKE:
+Browser --> public LoadBalancer --> Gateway -- /api, /actuator --> internal API Service
+                                      |                               |
+                                      +-- other paths --> UI          +--> Cloud SQL
+
+Both API deployments share the same MySQL database.
+```
+
+The Cloud Run gateway routes to the public API and UI services; the GKE gateway routes to internal Kubernetes services. Only the gateway is exposed through the GKE public LoadBalancer. The gateway is a reverse proxy, not an OAuth authorization server: the API validates bearer JWTs and enforces roles. Cloud SQL is the shared persistent store.
 
 ### Target logical architecture
 
@@ -105,8 +123,10 @@ All application endpoints are versioned under `/api/v1`. JSON is used for reques
 | `DELETE` | `/api/v1/users/{id}` | Authenticated | Delete a user |
 | `GET` | `/actuator/health` | Public | Runtime health probe |
 | `GET` | `/actuator/prometheus` | Public | Prometheus scrape endpoint |
+| `GET` | `/v3/api-docs` | Public | OpenAPI 3 specification |
+| `GET` | `/swagger-ui.html` | Public | Swagger UI documentation |
 
-The current application exposes these API paths directly on port `8081`, and the Angular development server serves the client on port `4200`. In the target deployment, the gateway exposes them externally and routes the auth and user prefixes to their respective services.
+The current application exposes these API paths directly on port `8081`, and the Angular development server serves the client on port `4200`. Swagger UI documents the current controller endpoints and supports the Bearer JWT scheme for user operations. In the target deployment, the gateway exposes them externally and routes the auth and user prefixes to their respective services.
 
 ### Error shape
 
@@ -139,6 +159,18 @@ Application errors use a JSON object with a stable error `code` and a human-read
 ### User operations
 
 The client calls `/api/v1/users` with a valid bearer access token. The user service validates input, applies the requested CRUD/search operation, and returns a DTO that excludes the password hash. Listing and email search use Spring Data pagination. The current design requires authentication for user operations; it does not yet restrict records to the caller's own account or provide a complete administrator authorization policy.
+
+### Complete application flow: step by step
+
+1. **Choose a runtime configuration.** Local Docker Compose supplies a MySQL container and environment variables from `.env`. The demo Spring profile uses in-memory H2 and loses its data when the process stops. Cloud deployments supply the database URL and credentials for Cloud SQL.
+2. **Start the API and initialize storage.** Spring Boot reads `application.yaml` plus environment overrides. Flyway applies pending migrations; Hibernate validates that the entity mappings match the migrated schema. The API exposes its configured port and Actuator health endpoint.
+3. **Load the UI.** The browser downloads the Angular single-page application. Nginx serves static assets and routes browser API requests under `/api` to the backend. The Cloud Run UI proxies to the Cloud Run API URL; GKE UI proxies to the internal Kubernetes `api` Service.
+4. **Register an account.** Angular validates the form, then sends JSON to `POST /api/v1/auth/register`. `AuthController` applies request DTO validation and calls `AuthService`. The service normalizes email, checks uniqueness, loads `ROLE_USER`, BCrypt-hashes the password, and persists the user and role association. It returns success without returning a password or hash.
+5. **Sign in.** The browser sends credentials to `POST /api/v1/auth/login`. The service finds the user case-insensitively, verifies the enabled flag and BCrypt password, then returns an HS256 access JWT and a random refresh token. The database stores only the refresh-token SHA-256 hash and expiration.
+6. **Call a protected endpoint.** Angular stores the tokens in `sessionStorage`; its interceptor attaches the access token as a Bearer credential to non-auth API calls. Spring Security validates the JWT signature, issuer, expiry, and access-token type before routing the request to the user controller.
+7. **Read or change directory data.** `UserController` delegates to `UserService`, which validates input and uses Spring Data repositories. The user response DTO excludes the password hash. MySQL constraints protect uniqueness and references. Listing/search use pagination.
+8. **Refresh or end a client session.** The refresh endpoint hashes the supplied token, looks it up under a database write lock, checks expiry and account status, deletes the old record, and issues a replacement pair. The Angular UI does not currently automate this call; on a protected `401`, it clears browser tokens and routes to login. Client logout clears local tokens but does not revoke already issued access JWTs.
+9. **Handle failures and observe the service.** `ApiExceptionHandler` maps expected validation, authentication, not-found, and conflict exceptions to JSON error responses. SLF4J logs application events to process output. Actuator health and Prometheus endpoints are exposed; a complete central logging/tracing/alerting stack is not configured.
 
 ## 7. Data model
 
@@ -198,11 +230,13 @@ The JWT signing key is symmetric in the current implementation. For independentl
 The default Spring profile connects to MySQL using:
 
 - `DB_URL` (default `jdbc:mysql://localhost:3306/user_registration`)
-- `DB_USERNAME` (default `root`)
-- `DB_PASSWORD` (default `password`)
+- `DB_USERNAME` (default `registration_app`)
+- `DB_PASSWORD` (default `admin`; local development only)
 - `SERVER_PORT` (default `8081`)
 - `JWT_SECRET` (base64-encoded key; must decode to at least 32 bytes)
 - `JWT_ISSUER`, `JWT_ACCESS_TOKEN_TTL`, and `JWT_REFRESH_TOKEN_TTL`
+
+The database username and password defaults are convenient for local development only. Use a least-privilege account and inject strong credentials through environment variables or a secret manager outside local development. The Docker Compose stack reads its required database and JWT values from `.env`; it does not use the application defaults for those required secrets.
 
 For a disposable local demo that does not require MySQL:
 
@@ -223,9 +257,57 @@ Open `http://localhost:4200`. The Angular dev-server proxy forwards API calls to
 
 Docker Compose and Kubernetes setup, environment variables, secret creation, image builds, deployment, and local access are documented in [`kubernetes/README.md`](kubernetes/README.md). The root Compose file runs MySQL, the API, and the UI; Kubernetes uses a MySQL StatefulSet and API/UI Deployments.
 
+### Cloud deployment flow: step by step
+
+The deployed Cloud Run and GKE APIs use the same Cloud SQL instance and database. Current demo configuration documented by this repository:
+
+| Property | Current demo value |
+|---|---|
+| Cloud SQL instance | `user-registration-mysql` |
+| Region | `asia-south1` |
+| Engine / database | MySQL 8.0 / `user_registration` |
+| Instance sizing | `db-f1-micro`, 10 GiB SSD, zonal |
+| Backups | Automated daily backups enabled |
+| Connection | Cloud SQL Java Connector, using the instance connection name |
+
+Deployment sequence:
+
+1. **Build and publish images.** Build API and UI container images, tag them for the deployment, and push them to the `user-registration` Artifact Registry repository in the deployment region.
+2. **Prepare Cloud SQL.** Create the MySQL instance and `user_registration` database. The application connects through the Cloud SQL Java Connector; it does not depend on a public database IP allowlist.
+3. **Prepare identity and secrets.** Grant the Cloud Run runtime service account `roles/cloudsql.client` and access to the necessary Secret Manager secrets. For GKE, grant Cloud SQL access to the Google service account linked to the API Kubernetes service account through Workload Identity. Supply database username/password and JWT signing secret at runtime; never put real secret values in the repository or container image.
+4. **Deploy the Cloud Run API.** Configure the API image, Cloud SQL instance attachment, runtime service account, database URL, database credentials, JWT issuer/secret, and UI CORS origin. Cloud Run supplies the `PORT` environment variable.
+5. **Deploy the Cloud Run UI and gateway.** Configure the UI's Nginx `API_UPSTREAM` with the Cloud Run API URL, then deploy the Spring WebFlux gateway with both Cloud Run service URLs as upstreams. Its WebClient forwards browser/API requests; use the gateway URL for application traffic.
+6. **Deploy to GKE.** Create/target the GKE cluster and namespace, apply the Cloud SQL ConfigMap and Workload Identity service account, create the Kubernetes Secret, then apply the API, UI, and gateway Deployments. Set their images to the published Artifact Registry references. Skip the local MySQL StatefulSet for the Cloud SQL deployment.
+7. **Expose and verify.** Expose the GKE gateway with `kubernetes/public-gateway-service.yaml`; keep API and UI as internal ClusterIP services. Wait for Deployment rollouts, inspect health/logs, then test registration, login, and API routes through the gateway.
+
+Relevant configuration and implementation files:
+
+- `src/main/resources/application.yaml` — datasource environment-variable mapping, Flyway, Hibernate validation, and server port.
+- `build.gradle` — MySQL driver and Cloud SQL Java Connector dependencies.
+- `src/main/resources/db/migration/V1__create_user_auth_schema.sql` — database schema and initial roles.
+- `kubernetes/gke-cloudsql-configmap.yaml` — GKE JDBC URL / instance connection name and non-secret settings.
+- `kubernetes/gke-cloudsql-service-account.yaml` — Kubernetes-to-Google service-account association for Workload Identity.
+- `gateway/src/main/java/org/example/user_registration/gateway/GatewayController.java` — WebClient-based streaming reverse proxy.
+- `gateway/src/main/java/org/example/user_registration/gateway/WebClientConfiguration.java` — WebClient connector and timeout configuration.
+- `gateway/build.gradle` and `gateway/Dockerfile` — gateway module dependencies and container image.
+- `kubernetes/api.yaml` — API environment references, probes, resources, and internal Service.
+- `kubernetes/ui.yaml` and `kubernetes/public-gateway-service.yaml` — UI Deployment and public gateway LoadBalancer.
+- `kubernetes/README.md` — step-by-step provisioning and deployment commands.
+
+Previously verified service endpoints (availability depends on the GCP resources remaining active; the gateway itself has not yet been deployed):
+
+- Cloud Run API Gateway: deploy `user-registration-gateway` following [`kubernetes/README.md`](kubernetes/README.md); the gateway service URL is the single app/API entry point.
+- Cloud Run UI: <https://user-registration-ui-z56jr6utaq-el.a.run.app>
+- Cloud Run API: <https://user-registration-api-z56jr6utaq-el.a.run.app>
+- Cloud Run Swagger UI: <https://user-registration-api-z56jr6utaq-el.a.run.app/swagger-ui.html>
+- GKE gateway: expose the gateway with `kubernetes/public-gateway-service.yaml`; the assigned LoadBalancer IP is the single app/API entry point.
+- Importable Postman requests: [`postman/User_Registration_API.postman_collection.json`](postman/User_Registration_API.postman_collection.json)
+
 ## 10. Observability and operations
 
-The current backend exposes Actuator health and Prometheus endpoints and configures a sampling probability for tracing. A production platform should additionally:
+The current backend exposes Actuator health and Prometheus endpoints and configures a sampling probability for tracing. SLF4J application logs record successful registration, authentication, refresh-token renewal, and user create/update/delete operations, along with handled authentication, validation, resource-not-found, and conflict errors. These logs avoid passwords, JWTs, refresh tokens, and email addresses. The application currently uses the configured logging backend's default output format; centralized structured logging and trace correlation are not configured.
+
+A production platform should additionally:
 
 - Export traces over OTLP to an OpenTelemetry Collector and from there to a trace backend such as Jaeger.
 - Scrape service metrics with Prometheus and build dashboards/alerts in Grafana.
@@ -238,16 +320,16 @@ The tracing exporter, JSON logging configuration, Collector, Prometheus scraping
 
 ## 11. Deployment evolution
 
-1. **Current runnable stack:** one Spring Boot application on port `8081`, an Angular UI, MySQL and Flyway, a Docker Compose stack, baseline Kubernetes manifests, and H2 profiles for tests and local demo.
+1. **Current runnable stack:** one Spring Boot application on port `8081`, an Angular UI, MySQL and Flyway, a Spring WebFlux gateway using WebClient, a Docker Compose stack, baseline Kubernetes manifests, and H2 profiles for tests and local demo.
 2. **Service extraction:** split authentication and user-management packages into separate deployable services while preserving `/api/v1` contracts and coordinating schema ownership.
-3. **Gateway:** add a Spring Cloud Gateway in front of the existing Angular client and backend APIs; configure proxy routing, edge CORS, and rate limiting.
+3. **Gateway evolution:** the current Spring WebFlux gateway uses WebClient to route browser/API traffic. Spring Cloud Gateway can add service discovery, policy-based edge filters, and centralized rate limiting as backend services are split.
 4. **Operational platform:** configure OTLP exporters, Collector, Prometheus scraping, Grafana dashboards, alerts, and production storage/backup policies.
 5. **Production hardening:** establish role and ownership policy, key rotation, rate limits, backups, data retention, migration rollout procedures, and security monitoring.
 
 ## 12. Important design decisions and limitations
 
-- The repository remains a single application until service extraction is implemented; the target service boundaries do not imply that a gateway or two running services already exist.
-- Docker Compose and Kubernetes starter files are present, but the API gateway, separately deployed auth/user services, and full telemetry stack are not implemented.
+- The repository remains a single application with API, UI, and gateway runtime containers; the target service boundaries do not imply separate auth or user microservices.
+- The Spring WebFlux gateway routes requests with WebClient but does not replace backend JWT validation or role authorization. Auth/user microservices and the full telemetry stack are not implemented.
 - Access tokens last one hour by default; refresh tokens last seven days by default. Tune these values against the deployment's threat model.
 - Refresh-token revocation is stateful and depends on the database. Access tokens remain valid until expiry unless a future revocation/versioning mechanism is introduced.
-- Authentication protects user endpoints, but the current implementation does not yet enforce per-user ownership or role-based access decisions for each operation.
+- The API validates issuer-bound JWT access tokens and maps the signed `roles` claim to Spring Security authorities. `ROLE_USER` accounts can read/update their own profile; `ROLE_ADMIN` is required for directory and user-management operations. Public registration never accepts roles; administrator role assignment is performed by a trusted operator.

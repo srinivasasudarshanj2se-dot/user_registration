@@ -1,6 +1,6 @@
-import { Routes } from '@angular/router';
+import {Routes} from '@angular/router';
 
-import { authGuard } from './auth.guard';
+import {authGuard} from './auth.guard';
 
 export const routes: Routes = [
   {
@@ -16,10 +16,22 @@ export const routes: Routes = [
   },
   {
     path: 'dashboard',
-    title: 'People | userspace',
+    title: 'Dashboard | userspace',
     canActivate: [authGuard],
     loadComponent: () => import('./dashboard-page.component').then((module) => module.DashboardPageComponent),
   },
-  { path: '', pathMatch: 'full', redirectTo: 'dashboard' },
-  { path: '**', redirectTo: 'dashboard' },
+  {
+    path: 'calls',
+    title: 'Live calls | userspace',
+    canActivate: [authGuard],
+    loadComponent: () => import('./call-monitor-page.component').then((module) => module.CallMonitorPageComponent),
+  },
+  {
+    path: 'account',
+    title: 'My account | userspace',
+    canActivate: [authGuard],
+    loadComponent: () => import('./account-page.component').then((module) => module.AccountPageComponent),
+  },
+  {path: '', pathMatch: 'full', redirectTo: 'dashboard'},
+  {path: '**', redirectTo: 'dashboard'},
 ];

@@ -1,0 +1,17 @@
+# Public entry point for application and API traffic through the gateway.
+apiVersion: v1
+kind: Service
+metadata:
+  name: user-registration-public
+  namespace: user-registration
+  labels:
+    app.kubernetes.io/name: user-registration-gateway
+    app.kubernetes.io/part-of: user-registration
+spec:
+  type: LoadBalancer
+  selector:
+    app.kubernetes.io/name: user-registration-gateway
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

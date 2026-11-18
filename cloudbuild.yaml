@@ -1,0 +1,219 @@
+steps:
+  - id: backend-quality-gates
+    name: eclipse-temurin:25-jdk-noble
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        chmod +x ./gradlew
+        ./gradlew --no-daemon check
+    timeout: 1800s
+
+  - id: frontend-quality-gates
+    name: node:22-bookworm
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        apt-get update
+        apt-get install -y --no-install-recommends chromium
+        cd angular-ui
+        npm ci
+        CHROME_BIN=/usr/bin/chromium npm test -- --browsers=ChromeHeadlessNoSandbox --no-progress
+    timeout: 1800s
+
+  - id: call-processor-tests
+    name: python:3.12-slim
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        cd functions/call-processor
+        pip install --no-cache-dir -r requirements.txt
+        python -m unittest -v
+    timeout: 1800s
+
+  - id: build-api
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - Dockerfile
+      - -t
+      - ${_ARTIFACT_REGION}-docker.pkg.dev/$PROJECT_ID/${_ARTIFACT_REPOSITORY}/user-registration-api:$BUILD_ID
+      - .
+    waitFor:
+      - backend-quality-gates
+      - frontend-quality-gates
+      - call-processor-tests
+
+  - id: build-ui
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - angular-ui/Dockerfile
+      - -t
+      - ${_ARTIFACT_REGION}-docker.pkg.dev/$PROJECT_ID/${_ARTIFACT_REPOSITORY}/user-registration-ui:$BUILD_ID
+      - angular-ui
+    waitFor:
+      - backend-quality-gates
+      - frontend-quality-gates
+      - call-processor-tests
+
+  - id: build-gateway
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - gateway/Dockerfile
+      - -t
+      - ${_ARTIFACT_REGION}-docker.pkg.dev/$PROJECT_ID/${_ARTIFACT_REPOSITORY}/user-registration-gateway:$BUILD_ID
+      - .
+    waitFor:
+      - backend-quality-gates
+
+  - id: push-images
+    name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        docker push "${_ARTIFACT_REGION}-docker.pkg.dev/$PROJECT_ID/${_ARTIFACT_REPOSITORY}/user-registration-api:$BUILD_ID"
+        docker push "${_ARTIFACT_REGION}-docker.pkg.dev/$PROJECT_ID/${_ARTIFACT_REPOSITORY}/user-registration-ui:$BUILD_ID"
+        docker push "${_ARTIFACT_REGION}-docker.pkg.dev/$PROJECT_ID/${_ARTIFACT_REPOSITORY}/user-registration-gateway:$BUILD_ID"
+    waitFor:
+      - build-api
+      - build-ui
+      - build-gateway
+
+  - id: get-gke-credentials
+    name: gcr.io/cloud-builders/gcloud
+    args:
+      - container
+      - clusters
+      - get-credentials
+      - ${_GKE_CLUSTER}
+      - --region=${_GKE_LOCATION}
+      - --project=$PROJECT_ID
+    waitFor:
+      - push-images
+
+  - id: deploy-gke
+    name: gcr.io/cloud-builders/kubectl
+    entrypoint: bash
+    secretEnv:
+      - DB_USERNAME
+      - DB_PASSWORD
+      - JWT_SECRET
+    args:
+      - -ceu
+      - |
+        kubectl apply -f kubernetes/namespace.yaml
+        kubectl create serviceaccount user-registration-api \
+          --namespace "${_K8S_NAMESPACE}" \
+          --dry-run=client -o yaml | kubectl apply -f -
+        kubectl annotate serviceaccount user-registration-api \
+          --namespace "${_K8S_NAMESPACE}" \
+          "iam.gke.io/gcp-service-account=${_GKE_RUNTIME_SERVICE_ACCOUNT}@$PROJECT_ID.iam.gserviceaccount.com" \
+          --overwrite
+
+        kubectl create configmap user-registration-config \
+          --namespace "${_K8S_NAMESPACE}" \
+          --from-literal=MYSQL_DATABASE="${_DATABASE_NAME}" \
+          --from-literal=DB_URL="jdbc:mysql:///${_DATABASE_NAME}?cloudSqlInstance=${_CLOUDSQL_INSTANCE}&socketFactory=com.google.cloud.sql.mysql.SocketFactory&connectTimeout=30000&socketTimeout=30000" \
+          --from-literal=JWT_ISSUER="${_JWT_ISSUER}" \
+          --from-literal=SERVER_PORT="8081" \
+          --from-literal=SECURITY_CORS_ALLOWED_ORIGIN="${_CORS_ORIGIN}" \
+          --dry-run=client -o yaml | kubectl apply -f -
+
+        kubectl create secret generic user-registration-secrets \
+          --namespace "${_K8S_NAMESPACE}" \
+          --from-literal=db-username="$$DB_USERNAME" \
+          --from-literal=db-password="$$DB_PASSWORD" \
+          --from-literal=jwt-secret="$$JWT_SECRET" \
+          --dry-run=client -o yaml | kubectl apply -f -
+
+        kubectl apply -f kubernetes/api.yaml
+        kubectl apply -f kubernetes/ui.yaml
+        kubectl apply -f kubernetes/gateway.yaml
+        kubectl apply -f kubernetes/public-gateway-service.yaml
+
+        IMAGE_PREFIX="${_ARTIFACT_REGION}-docker.pkg.dev/$PROJECT_ID/${_ARTIFACT_REPOSITORY}"
+        kubectl set image deployment/user-registration-api \
+          "api=$$IMAGE_PREFIX/user-registration-api:$BUILD_ID" --namespace "${_K8S_NAMESPACE}"
+        kubectl set image deployment/user-registration-ui \
+          "ui=$$IMAGE_PREFIX/user-registration-ui:$BUILD_ID" --namespace "${_K8S_NAMESPACE}"
+        kubectl set image deployment/user-registration-gateway \
+          "gateway=$$IMAGE_PREFIX/user-registration-gateway:$BUILD_ID" --namespace "${_K8S_NAMESPACE}"
+
+        kubectl rollout status deployment/user-registration-api \
+          --namespace "${_K8S_NAMESPACE}" --timeout=10m
+        kubectl rollout status deployment/user-registration-ui \
+          --namespace "${_K8S_NAMESPACE}" --timeout=10m
+        kubectl rollout status deployment/user-registration-gateway \
+          --namespace "${_K8S_NAMESPACE}" --timeout=10m
+
+        for attempt in $$(seq 1 60); do
+          GATEWAY_IP=$$(kubectl get service user-registration-public \
+            --namespace "${_K8S_NAMESPACE}" \
+            -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+          if [ -n "$$GATEWAY_IP" ]; then
+            break
+          fi
+          sleep 10
+        done
+        if [ -z "$$GATEWAY_IP" ]; then
+          echo "Timed out waiting for the gateway external IP" >&2
+          exit 1
+        fi
+
+        kubectl create configmap user-registration-config \
+          --namespace "${_K8S_NAMESPACE}" \
+          --from-literal=MYSQL_DATABASE="${_DATABASE_NAME}" \
+          --from-literal=DB_URL="jdbc:mysql:///${_DATABASE_NAME}?cloudSqlInstance=${_CLOUDSQL_INSTANCE}&socketFactory=com.google.cloud.sql.mysql.SocketFactory&connectTimeout=30000&socketTimeout=30000" \
+          --from-literal=JWT_ISSUER="${_JWT_ISSUER}" \
+          --from-literal=SERVER_PORT="8081" \
+          --from-literal=SECURITY_CORS_ALLOWED_ORIGIN="http://$$GATEWAY_IP" \
+          --dry-run=client -o yaml | kubectl apply -f -
+        kubectl rollout restart deployment/user-registration-api --namespace "${_K8S_NAMESPACE}"
+        kubectl rollout status deployment/user-registration-api \
+          --namespace "${_K8S_NAMESPACE}" --timeout=10m
+        echo "Application URL: http://$$GATEWAY_IP"
+        echo "API health URL: http://$$GATEWAY_IP/actuator/health"
+        echo "API documentation URL: http://$$GATEWAY_IP/swagger-ui.html"
+    timeout: 1800s
+    waitFor:
+      - get-gke-credentials
+
+availableSecrets:
+  secretManager:
+    - versionName: projects/$PROJECT_ID/secrets/${_DB_USERNAME_SECRET}/versions/latest
+      env: DB_USERNAME
+    - versionName: projects/$PROJECT_ID/secrets/${_DB_PASSWORD_SECRET}/versions/latest
+      env: DB_PASSWORD
+    - versionName: projects/$PROJECT_ID/secrets/${_JWT_SECRET_SECRET}/versions/latest
+      env: JWT_SECRET
+
+substitutions:
+  _ARTIFACT_REGION: asia-south1
+  _ARTIFACT_REPOSITORY: user-registration
+  _GKE_CLUSTER: user-registration
+  _GKE_LOCATION: asia-south1
+  _K8S_NAMESPACE: user-registration
+  _GKE_RUNTIME_SERVICE_ACCOUNT: user-registration-gke
+  _CLOUDSQL_INSTANCE: project-1c77217d-d5f2-4a0b-9aa:asia-south1:user-registration-mysql
+  _DATABASE_NAME: user_registration
+  _JWT_ISSUER: user-registration
+  _CORS_ORIGIN: http://35.200.221.220
+  _DB_USERNAME_SECRET: user-registration-sql-username
+  _DB_PASSWORD_SECRET: user-registration-sql-password
+  _JWT_SECRET_SECRET: jwt-secret
+
+images:
+  - ${_ARTIFACT_REGION}-docker.pkg.dev/$PROJECT_ID/${_ARTIFACT_REPOSITORY}/user-registration-api:$BUILD_ID
+  - ${_ARTIFACT_REGION}-docker.pkg.dev/$PROJECT_ID/${_ARTIFACT_REPOSITORY}/user-registration-ui:$BUILD_ID
+  - ${_ARTIFACT_REGION}-docker.pkg.dev/$PROJECT_ID/${_ARTIFACT_REPOSITORY}/user-registration-gateway:$BUILD_ID
+
+options:
+  logging: CLOUD_LOGGING_ONLY

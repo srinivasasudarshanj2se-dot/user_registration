@@ -1,0 +1,6 @@
+server:
+  port: ${PORT:8080}
+
+gateway:
+  api-upstream: ${API_UPSTREAM:http://api:8081}
+  ui-upstream: ${UI_UPSTREAM:http://ui:8080}

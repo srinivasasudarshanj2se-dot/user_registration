@@ -1,0 +1,26 @@
+steps:
+  - id: backend-quality-gates
+    name: eclipse-temurin:25-jdk-noble
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        chmod +x ./gradlew
+        ./gradlew --no-daemon check
+    timeout: 1800s
+
+  - id: frontend-quality-gates
+    name: node:22-bookworm
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        apt-get update
+        apt-get install -y --no-install-recommends chromium
+        cd angular-ui
+        npm ci
+        CHROME_BIN=/usr/bin/chromium npm test -- --browsers=ChromeHeadlessNoSandbox --no-progress
+    timeout: 1800s
+
+options:
+  logging: CLOUD_LOGGING_ONLY

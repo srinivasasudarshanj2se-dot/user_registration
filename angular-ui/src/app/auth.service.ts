@@ -1,9 +1,9 @@
-import { HttpClient } from '@angular/common/http';
-import { Injectable, signal } from '@angular/core';
-import { Router } from '@angular/router';
-import { Observable, tap } from 'rxjs';
+import {HttpClient} from '@angular/common/http';
+import {Injectable, signal} from '@angular/core';
+import {Router} from '@angular/router';
+import {Observable, tap} from 'rxjs';
 
-import { environment } from '../environments/environment';
+import {environment} from '../environments/environment';
 
 export interface TokenResponse {
   accessToken: string;
@@ -19,7 +19,7 @@ export interface RegisterRequest {
   password: string;
 }
 
-@Injectable({ providedIn: 'root' })
+@Injectable({providedIn: 'root'})
 export class AuthService {
   private readonly accessTokenKey = 'user-registration.access-token';
   private readonly refreshTokenKey = 'user-registration.refresh-token';
@@ -30,11 +30,12 @@ export class AuthService {
   constructor(
     private readonly http: HttpClient,
     private readonly router: Router,
-  ) {}
+  ) {
+  }
 
   login(email: string, password: string): Observable<TokenResponse> {
     return this.http
-      .post<TokenResponse>(`${environment.apiUrl}/api/v1/auth/login`, { email, password })
+      .post<TokenResponse>(`${environment.apiUrl}/api/v1/auth/login`, {email, password})
       .pipe(tap((tokens) => this.saveTokens(tokens)));
   }
 
@@ -47,6 +48,23 @@ export class AuthService {
 
   getAccessToken(): string | null {
     return this.readAccessToken();
+  }
+
+  hasRole(role: string): boolean {
+    const token = this.readAccessToken();
+    if (!token) return false;
+    try {
+      const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))) as {
+        roles?: unknown;
+      };
+      return Array.isArray(payload.roles) && payload.roles.includes(role);
+    } catch {
+      return false;
+    }
+  }
+
+  isAdmin(): boolean {
+    return this.hasRole('ROLE_ADMIN');
   }
 
   logout(): void {

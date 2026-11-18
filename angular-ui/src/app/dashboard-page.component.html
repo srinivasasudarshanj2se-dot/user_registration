@@ -5,12 +5,14 @@
     </a>
     <div class="topbar-right">
       <span class="workspace-label"><span class="workspace-dot"></span> Workspace</span>
+      <a mat-button routerLink="/account">My account</a>
       <span class="avatar" aria-label="Account">U</span>
       <button mat-button class="logout-button" (click)="logout()">Sign out</button>
     </div>
   </header>
 
   <main class="dashboard-content">
+    @if (isAdmin) {
     <section class="welcome-row">
       <div>
         <div class="breadcrumb">WORKSPACE <span>/</span> PEOPLE</div>
@@ -20,6 +22,7 @@
       <button mat-flat-button class="add-button" (click)="openEditor()">
         <span class="plus-icon">+</span> Add person
       </button>
+      <a mat-stroked-button routerLink="/calls">Live calls</a>
     </section>
 
     <section class="summary-grid" aria-label="Directory summary">
@@ -121,5 +124,42 @@
       }
     </mat-card>
     <footer class="page-footer"><span>USERSPACE</span> A little more organized, every day.</footer>
+    } @else {
+    <section class="welcome-row">
+      <div>
+        <div class="breadcrumb">WORKSPACE <span>/</span> MY DASHBOARD</div>
+        <h1>Welcome{{ profile ? ', ' + profile.firstName : '' }}</h1>
+        <p class="subtitle">Your account is ready. Manage your profile and personal details here.</p>
+      </div>
+      <a mat-flat-button class="add-button" routerLink="/account">Manage my account</a>
+    </section>
+
+    <mat-card class="directory-card">
+      <div class="directory-heading">
+        <div>
+          <h2>My profile</h2>
+          <p>Your personal account details.</p>
+        </div>
+      </div>
+      @if (loading && !profile) {
+        <div class="loading-state"><mat-spinner diameter="34" /><span>Loading your profile…</span></div>
+      } @else if (errorMessage) {
+        <div class="table-message error-message" role="alert">
+          {{ errorMessage }}
+          <button mat-button (click)="loadProfile()">Try again</button>
+        </div>
+      } @else if (profile) {
+        <div class="profile-summary">
+          <div class="person-cell">
+            <span class="person-avatar">{{ profile.firstName.charAt(0) }}{{ profile.lastName.charAt(0) }}</span>
+            <span class="person-name">{{ profile.firstName }} {{ profile.lastName }}</span>
+          </div>
+          <p><strong>Email address</strong><span>{{ profile.email }}</span></p>
+          <p><strong>Mobile</strong><span>{{ profile.mobile }}</span></p>
+        </div>
+      }
+    </mat-card>
+    <footer class="page-footer"><span>USERSPACE</span> A little more organized, every day.</footer>
+    }
   </main>
 </div>

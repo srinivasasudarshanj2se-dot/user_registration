@@ -65,11 +65,16 @@ spec:
               mountPath: /tmp
             - name: nginx-cache
               mountPath: /var/cache/nginx
+            - name: nginx-config
+              mountPath: /etc/nginx/conf.d
       volumes:
         - name: tmp
           emptyDir:
             sizeLimit: 64Mi
         - name: nginx-cache
+          emptyDir:
+            sizeLimit: 64Mi
+        - name: nginx-config
           emptyDir:
             sizeLimit: 64Mi
 ---
