@@ -89,13 +89,13 @@ steps:
 
   - id: get-gke-credentials
     name: gcr.io/cloud-builders/gcloud
+    entrypoint: bash
     args:
-      - container
-      - clusters
-      - get-credentials
-      - ${_GKE_CLUSTER}
-      - --region=${_GKE_LOCATION}
-      - --project=$PROJECT_ID
+      - -ceu
+      - |
+        gcloud container clusters get-credentials "${_GKE_CLUSTER}" \
+          --region="${_GKE_LOCATION}" \
+          --project="$PROJECT_ID"
     waitFor:
       - push-images
 
@@ -123,6 +123,8 @@ steps:
           --from-literal=MYSQL_DATABASE="${_DATABASE_NAME}" \
           --from-literal=DB_URL="jdbc:mysql:///${_DATABASE_NAME}?cloudSqlInstance=${_CLOUDSQL_INSTANCE}&socketFactory=com.google.cloud.sql.mysql.SocketFactory&connectTimeout=30000&socketTimeout=30000" \
           --from-literal=JWT_ISSUER="${_JWT_ISSUER}" \
+          --from-literal=GCP_PROJECT_ID="$PROJECT_ID" \
+          --from-literal=CALL_EVENTS_TOPIC="${_CALL_EVENTS_TOPIC}" \
           --from-literal=SERVER_PORT="8081" \
           --from-literal=SECURITY_CORS_ALLOWED_ORIGIN="${_CORS_ORIGIN}" \
           --dry-run=client -o yaml | kubectl apply -f -
@@ -173,6 +175,8 @@ steps:
           --from-literal=MYSQL_DATABASE="${_DATABASE_NAME}" \
           --from-literal=DB_URL="jdbc:mysql:///${_DATABASE_NAME}?cloudSqlInstance=${_CLOUDSQL_INSTANCE}&socketFactory=com.google.cloud.sql.mysql.SocketFactory&connectTimeout=30000&socketTimeout=30000" \
           --from-literal=JWT_ISSUER="${_JWT_ISSUER}" \
+          --from-literal=GCP_PROJECT_ID="$PROJECT_ID" \
+          --from-literal=CALL_EVENTS_TOPIC="${_CALL_EVENTS_TOPIC}" \
           --from-literal=SERVER_PORT="8081" \
           --from-literal=SECURITY_CORS_ALLOWED_ORIGIN="http://$$GATEWAY_IP" \
           --dry-run=client -o yaml | kubectl apply -f -
@@ -197,18 +201,19 @@ availableSecrets:
 
 substitutions:
   _ARTIFACT_REGION: asia-south1
-  _ARTIFACT_REPOSITORY: user-registration
+  _ARTIFACT_REPOSITORY: user-registration-tf
   _GKE_CLUSTER: user-registration
   _GKE_LOCATION: asia-south1
   _K8S_NAMESPACE: user-registration
-  _GKE_RUNTIME_SERVICE_ACCOUNT: user-registration-gke
-  _CLOUDSQL_INSTANCE: project-1c77217d-d5f2-4a0b-9aa:asia-south1:user-registration-mysql
+  _GKE_RUNTIME_SERVICE_ACCOUNT: user-registration-tf-runtime
+  _CLOUDSQL_INSTANCE: project-1c77217d-d5f2-4a0b-9aa:asia-south1:user-registration-tf-mysql
+  _CALL_EVENTS_TOPIC: user-registration-tf-call-events
   _DATABASE_NAME: user_registration
   _JWT_ISSUER: user-registration
   _CORS_ORIGIN: http://35.200.221.220
-  _DB_USERNAME_SECRET: user-registration-sql-username
-  _DB_PASSWORD_SECRET: user-registration-sql-password
-  _JWT_SECRET_SECRET: jwt-secret
+  _DB_USERNAME_SECRET: user-registration-tf-db-username
+  _DB_PASSWORD_SECRET: user-registration-tf-db-password
+  _JWT_SECRET_SECRET: user-registration-tf-jwt-secret
 
 images:
   - ${_ARTIFACT_REGION}-docker.pkg.dev/$PROJECT_ID/${_ARTIFACT_REPOSITORY}/user-registration-api:$BUILD_ID

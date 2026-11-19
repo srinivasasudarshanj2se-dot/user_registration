@@ -32,9 +32,9 @@ The `.env` values are for local development only. Never commit `.env` or reuse t
 
 ## Google Cloud Run
 
-Cloud Run runs the API and UI as separate public services. The deployed API and GKE API share the `user-registration-mysql` Cloud SQL for MySQL instance in `asia-south1`; both use the Cloud SQL Java Connector and credentials stored in Secret Manager/Kubernetes Secrets. The instance uses the `db-f1-micro` tier, 10 GiB SSD, and daily backups. Do not use the demo H2 profile for a persistent deployment.
+The Terraform stack runs the API, UI, and gateway as separate Cloud Run services and provisions `user-registration-tf-mysql`. The GKE deployment uses that same Cloud SQL instance through Workload Identity. Both use the Cloud SQL Java Connector; Cloud Run reads credentials from Secret Manager and GKE reads the corresponding secrets at deploy time. The instance uses the `db-f1-micro` tier, 10 GiB SSD, and daily backups. Do not use the demo H2 profile for a persistent deployment.
 
-The current test deployment is available at `https://user-registration-gateway-z56jr6utaq-el.a.run.app` (Cloud Run) and `http://8.231.121.126` (GKE). Both UIs write to the same Cloud SQL database.
+The current test deployment is available at `https://user-registration-tf-gateway-z56jr6utaq-el.a.run.app` (Cloud Run) and `http://8.231.121.126` (GKE). Both UIs write to the same Cloud SQL database.
 
 For live API URLs, CRUD endpoint details, request examples, and the Flyway SQL schema, see the [API and SQL testing guide](../docs/API_AND_SQL_TESTING.md).
 
@@ -253,11 +253,11 @@ The manifests support a local MySQL `StatefulSet` with a persistent volume claim
 
 ## Cloud Build CI/CD
 
-The repository root contains a Cloud Build deployment pipeline and a separate pull-request quality pipeline. Both run JUnit/JaCoCo and Angular/Karma tests with the configured 90% line-coverage gates. The deployment build cannot push or deploy unless all quality gates pass; it then pushes commit-tagged images to Artifact Registry, updates the GKE workloads, waits for rollouts, and prints the public URLs. GKE uses the existing Cloud SQL instance through Workload Identity.
+The repository root contains a Cloud Build deployment pipeline and a separate pull-request quality pipeline. The deployment build runs the backend, frontend, and call-processor tests before building and pushing the API/UI/gateway images, updating GKE, waiting for rollouts, and printing the public URLs. Images use the Cloud Build ID as their tag. GKE uses the Terraform-managed Cloud SQL instance, Pub/Sub topic, and runtime service account through Workload Identity.
 
 ### One-time setup
 
-This repository's current GCP project is configured for the `asia-south1` `user-registration` GKE cluster, the `user-registration` Artifact Registry repository, and these Secret Manager secret IDs: `user-registration-sql-username`, `user-registration-sql-password`, and `jwt-secret`. Review/override the substitutions in `cloudbuild.yaml` if the project resources differ. Never put secret values in Cloud Build substitutions or repository files.
+This repository's current GCP project is configured for the `asia-south1` `user-registration` GKE cluster, the `user-registration-tf` Artifact Registry repository, the `user-registration-tf-mysql` Cloud SQL instance, and the `user-registration-tf-call-events` Pub/Sub topic. It uses the `user-registration-tf-runtime` service account and the `user-registration-tf-db-username`, `user-registration-tf-db-password`, and `user-registration-tf-jwt-secret` secrets. Review/override the substitutions in `cloudbuild.yaml` if the project resources differ. Never put secret values in Cloud Build substitutions or repository files.
 
 Enable the Cloud Build API, then grant the dedicated deployer service account only the permissions the pipeline needs:
 
@@ -285,7 +285,7 @@ gcloud secrets add-iam-policy-binding jwt-secret `
   --role="roles/secretmanager.secretAccessor"
 ```
 
-The deployer account must also have `roles/container.developer` and `roles/logging.logWriter`; the existing project binding supplies these in the current project. Its Cloud Build execution permission should be limited to this trusted repository. The API Kubernetes service account `user-registration/user-registration-api` must retain its Workload Identity binding to `user-registration-gke@$PROJECT_ID.iam.gserviceaccount.com`, and that GSA needs `roles/cloudsql.client`. The current GKE cluster and GSA already have those bindings.
+For the current Terraform deployment, the default Cloud Build compute service account receives `roles/container.developer` and secret access on the three deployment secrets. Terraform also binds the Kubernetes service account `user-registration/user-registration-api` to `user-registration-tf-runtime@$PROJECT_ID.iam.gserviceaccount.com`; that GSA has Cloud SQL and Pub/Sub publisher access. If using a dedicated build service account instead, grant it the corresponding build, Artifact Registry, cluster-deployment, logging, and Secret Manager permissions.
 
 Connect the GitHub repository to Cloud Build once in Google Cloud Console (Cloud Build > Repositories > 2nd gen > Connect repository), install/authorize the Cloud Build GitHub App for `srinivasasudarshanj2se-dot/user_registration`, and then create quality/deploy triggers:
 

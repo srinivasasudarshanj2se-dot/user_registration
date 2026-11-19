@@ -78,6 +78,9 @@ def _connection():
         password=os.environ["DB_PASSWORD"],
         db=os.environ["DB_NAME"],
         ip_type=IPTypes.PUBLIC,
+        connect_timeout=20,
+        read_timeout=20,
+        write_timeout=20,
     )
 
 
@@ -93,7 +96,9 @@ def process_call(cloud_event):
         raise ValueError("Pub/Sub message must contain a base64-encoded JSON call event") from error
     event = _validated_event(payload)
 
+    print("Validated Pub/Sub call event; connecting to Cloud SQL")
     with _connection() as connection:
+        print("Cloud SQL connection established; upserting call event")
         with connection.cursor() as cursor:
             cursor.execute(
                 """
@@ -113,6 +118,7 @@ def process_call(cloud_event):
                 event,
             )
         connection.commit()
+    print("Cloud SQL upsert completed; writing event to BigQuery")
 
     row = {
         "call_id": event["call_id"],
@@ -130,3 +136,4 @@ def process_call(cloud_event):
     )
     if errors:
         raise RuntimeError(f"BigQuery rejected the call event: {errors}")
+    print("Call event persisted to Cloud SQL and BigQuery")

@@ -40,12 +40,13 @@ class CallProcessorTests(unittest.TestCase):
             with self.subTest(field=field), self.assertRaises(ValueError):
                 main._validated_event(payload)
 
-        payload = dict(self.payload, endedAt="2026-11-18T09:00:00Z")
+        payload = dict(self.payload, endedAt="2026-11-18T03:00:00Z")
         with self.assertRaisesRegex(ValueError, "earlier"):
             main._validated_event(payload)
 
     @patch.object(main, "_bigquery")
     @patch.object(main, "_connection")
+    @patch.dict("os.environ", {"BIGQUERY_TABLE": "test-project.test_dataset.call_events"})
     def test_persists_to_mysql_and_bigquery_idempotently(self, connection_factory, bq):
         cursor = MagicMock()
         connection = MagicMock()

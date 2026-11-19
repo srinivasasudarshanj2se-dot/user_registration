@@ -14,6 +14,10 @@ locals {
   ])
 }
 
+data "google_project" "current" {
+  project_id = var.project_id
+}
+
 resource "google_project_service" "required" {
   for_each = local.required_apis
 
@@ -113,10 +117,9 @@ resource "google_sql_database_instance" "application" {
     user_labels       = var.labels
 
     backup_configuration {
-      enabled                        = true
-      start_time                     = "18:00"
-      point_in_time_recovery_enabled = true
-      binary_log_enabled             = true
+      enabled            = true
+      start_time         = "18:00"
+      binary_log_enabled = true
     }
 
     ip_configuration {
@@ -234,6 +237,43 @@ resource "google_project_iam_member" "call_processor_eventarc_receiver" {
   member  = "serviceAccount:${google_service_account.call_processor.email}"
 }
 
+resource "google_project_iam_member" "call_processor_service_usage_consumer" {
+  project = var.project_id
+  role    = "roles/serviceusage.serviceUsageConsumer"
+  member  = "serviceAccount:${google_service_account.call_processor.email}"
+}
+
+resource "google_project_iam_member" "function_build_source_reader" {
+  project = var.project_id
+  role    = "roles/storage.objectViewer"
+  member  = "serviceAccount:${data.google_project.current.number}-compute@developer.gserviceaccount.com"
+}
+
+resource "google_project_iam_member" "gke_deployer" {
+  project = var.project_id
+  role    = "roles/container.developer"
+  member  = "serviceAccount:${data.google_project.current.number}-compute@developer.gserviceaccount.com"
+}
+
+resource "google_service_account_iam_member" "gke_workload_identity" {
+  service_account_id = google_service_account.runtime.name
+  role               = "roles/iam.workloadIdentityUser"
+  member             = "serviceAccount:${var.project_id}.svc.id.goog[user-registration/user-registration-api]"
+}
+
+resource "google_secret_manager_secret_iam_member" "build_secret_access" {
+  for_each = {
+    database_username = google_secret_manager_secret.database_username.secret_id
+    database_password = google_secret_manager_secret.database_password.secret_id
+    jwt_secret        = google_secret_manager_secret.jwt_secret.secret_id
+  }
+
+  project   = var.project_id
+  secret_id = each.value
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${data.google_project.current.number}-compute@developer.gserviceaccount.com"
+}
+
 resource "google_pubsub_topic_iam_member" "api_publisher" {
   project = var.project_id
   topic   = google_pubsub_topic.call_events.name
@@ -279,13 +319,13 @@ resource "google_cloudfunctions2_function" "call_processor" {
   }
 
   service_config {
-    max_instance_count               = 5
-    min_instance_count               = 0
-    available_memory                 = "512M"
-    timeout_seconds                  = 60
-    service_account_email            = google_service_account.call_processor.email
-    all_traffic_on_latest_revision   = true
-    ingress_settings                 = "ALLOW_ALL"
+    max_instance_count             = 5
+    min_instance_count             = 0
+    available_memory               = "512M"
+    timeout_seconds                = 60
+    service_account_email          = google_service_account.call_processor.email
+    all_traffic_on_latest_revision = true
+    ingress_settings               = "ALLOW_ALL"
     environment_variables = {
       INSTANCE_CONNECTION_NAME = google_sql_database_instance.application.connection_name
       DB_NAME                  = google_sql_database.application.name
@@ -317,11 +357,23 @@ resource "google_cloudfunctions2_function" "call_processor" {
     google_project_service.required,
     google_project_iam_member.call_processor_cloud_sql_client,
     google_project_iam_member.call_processor_eventarc_receiver,
+    google_project_iam_member.call_processor_service_usage_consumer,
+    google_project_iam_member.function_build_source_reader,
     google_bigquery_dataset_iam_member.call_processor_writer,
     google_secret_manager_secret_iam_member.call_processor_database_access,
     google_sql_database.application,
     google_sql_user.application,
   ]
+}
+
+resource "google_cloud_run_v2_service_iam_member" "call_processor_invoker" {
+  project  = var.project_id
+  location = var.region
+  name     = google_cloudfunctions2_function.call_processor.name
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.call_processor.email}"
+
+  depends_on = [google_cloudfunctions2_function.call_processor]
 }
 
 resource "google_secret_manager_secret_iam_member" "runtime_access" {
